@@ -1,173 +1,258 @@
 ---
-title: "hw1"
+title: "Breast Cancer Wisconsin"
 author: "Evgeny Limarenko"
-date: "2025-04-11"
+date: "2025-04-23"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
-```
-
-```{r}
+knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
-library(readxl)
+library(broom)
+library(knitr)
 ```
 
-Рассчитайте число наблюдений, среднее, стандартное отклонение, 1-й и 3-й квартили, минимум и максимум для переменных glucose, pressure, mass.
+## Загрузка и анализ данных
 
-```{r}
-file_path <- "pima.xlsx"
 
-if (!file.exists(file_path)) {
-  stop("pima.xlsx не найден")
-}
+```{r load}
+file_path <- "wisconsin_breast_cancer.csv" 
 
-pima_data <- read_excel(file_path)
+cancer_data <- tryCatch({
+  read_csv(file_path)
+}, error = function(e) {
+  stop(paste("Ошибка:", e$message))
+})
 
-glimpse(pima_data)
-head(pima_data)
+glimpse(cancer_data)
+kable(head(cancer_data))
 ```
+diagnosis: M = злокачественная, B = доброкачественная
 
-Рассчитайте описательную статистику для переменной diabetes. Создайте на основе переменной age новую переменную age_group, которая будет отражать следующие возрастные группы: 21–35, 36–49 и 50+. Посчитайте описательную статистику для новой переменной.
+## Линейная регрессия
+### Площадь ~ Радиус
+```{r task1a}
 
-```{r}
-# Выбираем нужные столбцы
-numeric_vars <- pima_data %>%
-  select(glucose, pressure, mass)
+model_area <- lm(area_mean ~ radius_mean, data = cancer_data)
+tidy_model_area <- tidy(model_area)
+glance_model_area <- glance(model_area)
 
-summary(numeric_vars)
+kable(tidy_model_area)
+kable(glance_model_area[, c("r.squared", "adj.r.squared", "p.value")])
 
-desc_stats <- numeric_vars %>%
-  summarise(
-    across(everything(), list(
-      tot = ~length(.),
-      na = ~sum(is.na(.)),
-      mean = ~mean(., na.rm = TRUE),
-      sd = ~sd(., na.rm = TRUE),
-      min = ~min(., na.rm = TRUE),
-      q1 = ~quantile(., 0.25, na.rm = TRUE),
-      median = ~median(., na.rm = TRUE),
-      q3 = ~quantile(., 0.75, na.rm = TRUE),
-      max = ~max(., na.rm = TRUE)
-    ), .names = "{.col}_{.fn}")
-  )
-
-t(desc_stats)
-```
-
-```{r}
-
-diabetes_counts <- table(pima_data$diabetes)
-diabetes_proportions <- prop.table(diabetes_counts) * 100
-
-cat("diabetes:")
-print(diabetes_counts)
-print(diabetes_proportions)
-
-pima_data <- pima_data %>%
-  mutate(
-    age_group = case_when(
-      age >= 21 & age <= 35 ~ "21-35",
-      age >= 36 & age <= 49 ~ "36-49",
-      age >= 50             ~ "50+",
-      TRUE                   ~ "Other" # < 21 или NA (если вдруг)
-    )
-  )
-
-pima_data$age_group <- factor(pima_data$age_group, levels = c("21-35", "36-49", "50+", "Other"))
-
-cat("\n\nage_group:")
-age_group_counts <- table(pima_data$age_group)
-age_group_proportions <- prop.table(age_group_counts) * 100
-
-print(age_group_counts)
-print(age_group_proportions)
-
-```
-
-Постройте два ящика с усами для значений pos и neg соответственно переменной diabetes.
-
-```{r}
-ggplot(pima_data, aes(x = diabetes, y = glucose, fill = diabetes)) +
-  geom_boxplot(notch = TRUE) + # спасибо за эту фичу
-  labs(
-    title = "Распределение глюкозы от диабета",
-    x = "диабет",
-    y = "давление",
-    fill = "статус"
-  ) +
+# График
+p_area <- ggplot(cancer_data, aes(x = radius_mean, y = area_mean)) +
+  geom_point(aes(color = diagnosis), alpha = 0.6) +
+  geom_smooth(method = "lm", color = "blue", se = TRUE) +
+  scale_color_manual(values = c("B" = "forestgreen", "M" = "coral")) +
+  labs(title = "Связь радиуса и площади",
+       subtitle = paste0("adj.r.squared = ", round(glance_model_area$adj.r.squared, 3)),
+       x = "Средний радиус",
+       y = "Средняя площадь",
+       color = "Диагноз") +
   theme_minimal()
 
-ggplot(pima_data, aes(x = diabetes, y = pressure, fill = diabetes)) +
-  geom_boxplot(notch = TRUE) +
-  labs(
-    title = "Распределение давления от диабета",
-    x = "диабет",
-    y = "глюкоза",
-    fill = "статус"
-  ) +
+print(p_area)
+```
+Обнаружена очень сильная и статистически значимая (p<0.001) положительная линейная связь между средним радиусом и средней площадью опухоли. Модель объясняет примерно 97.5% вариации площади, что указывает на то, что радиус ожидаемо является отличным предиктором площади
+
+### Периметр ~ Радиус
+```{r task1b}
+model_perimeter <- lm(perimeter_mean ~ radius_mean, data = cancer_data)
+
+tidy_model_perimeter <- tidy(model_perimeter)
+glance_model_perimeter <- glance(model_perimeter)
+
+kable(tidy_model_perimeter)
+kable(glance_model_perimeter[, c("r.squared", "adj.r.squared", "p.value")])
+
+# График
+p_perimeter <- ggplot(cancer_data, aes(x = radius_mean, y = perimeter_mean)) +
+  geom_point(aes(color = diagnosis), alpha = 0.6) +
+  geom_smooth(method = "lm", color = "green4", se = TRUE) +
+    scale_color_manual(values = c("B" = "forestgreen", "M" = "coral")) +
+  labs(title = "Связь радиуса и периметра",
+      subtitle = paste0("adj.r.squared = ", round(glance_model_perimeter$adj.r.squared, 3)),
+       x = "Средний радиус",
+       y = "Средний периметр",
+       color = "Диагноз") +
   theme_minimal()
 
-ggplot(pima_data, aes(x = diabetes, y = mass, fill = diabetes)) +
-  geom_boxplot(notch = TRUE) +
-  labs(
-    title = "Распределение массы от диабета",
-    x = "диабет",
-    y = "масса",
-    fill = "статус"
-  ) +
+print(p_perimeter)
+```
+Наблюдается исключительно сильная (p<0.001) и практически идеальная положительная линейная связь между средним радиусом и средним периметром опухоли. Модель объясняет около 99.6% вариации периметра, подтверждая, что эти две метрики геометрически тесно связаны
+
+### Симметричность ~ Радиус
+```{r task1c}
+model_symmetry <- lm(symmetry_mean ~ radius_mean, data = cancer_data)
+
+tidy_model_symmetry <- tidy(model_symmetry)
+glance_model_symmetry <- glance(model_symmetry)
+
+kable(tidy_model_symmetry)
+kable(glance_model_symmetry[, c("r.squared", "adj.r.squared", "p.value")])
+
+# График
+p_symmetry <- ggplot(cancer_data, aes(x = radius_mean, y = symmetry_mean)) +
+  geom_point(aes(color = diagnosis), alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  scale_color_manual(values = c("B" = "forestgreen", "M" = "coral")) +
+  labs(title = "Связь радиуса и симметричности",
+       subtitle = paste0("adj.r.squared = ", round(glance_model_symmetry$adj.r.squared, 3)),
+       x = "Средний радиус",
+       y = "Средняя симметричность",
+       color = "Диагноз") +
   theme_minimal()
+
+print(p_symmetry)
 ```
+Хотя обнаружена статистически значимая (p=0.0005) положительная связь между средним радиусом и средней симметричностью, эта связь очень слабая. Модель объясняет лишь около 1.9% вариации симметричности, что указывает на то, что средний радиус является плохим линейным предиктором для симметричности опухоли
 
--   Уровень глюкозы у пациентов с диабетом (pos) в среднем заметно выше и имеет больший разброс, чем у пациентов без диабета (neg). Различие медиан статистически значимо
--   Медианы и разброс уровня давления очень схожи для обеих групп. Засечки значительно перекрываются, указывая на отсутствие статистически значимой разницы между медианами.
--   Индекс массы тела у пациентов с диабетом в среднем заметно выше, чем у пациентов без диабета. Разница медиан статистически значима
+Вывод: Средний радиус опухоли является отличным линейным предиктором для средней площади и среднего периметра из-за сильных геометрических связей. Однако линейная связь среднего радиуса со средней симметричностью очень слабая
 
-# Статистическая гипотеза
+## Логистическая регрессия
 
-```{r}
-set.seed(42)
-sample_size <- 30
+```{r task2}
+# diagnosis: M -> 1, B -> 0
+cancer_data_log <- cancer_data %>%
+  mutate(diagnosis_numeric = ifelse(diagnosis == "M", 1, 0))
 
-mean_bp_before <- 155 # среднее до
-sd_bp_before <- 12
-
-mean_bp_after <- 145 # среднее после
-sd_bp_after <- 10
-
-# Симулируем данные
-bp_before <- rnorm(n = sample_size, mean = mean_bp_before, sd = sd_bp_before)
-# Снижение со случайным шумом
-reduction <- rnorm(n = sample_size, mean = (mean_bp_before - mean_bp_after), sd = 8)
-bp_after <- bp_before - reduction
-
-simulated_data <- data.frame(
-  patient_id = 1:sample_size,
-  bp_before = bp_before,
-  bp_after = bp_after
-)
-
-print(head(simulated_data))
-cat("до:", mean(bp_before), "\n")
-cat("после:", mean(bp_after), "\n")
-cat("разница:", mean(bp_before - bp_after), "\n\n")
+table(cancer_data_log$diagnosis, cancer_data_log$diagnosis_numeric)
 ```
+### diagnosis_numeric ~ radius_mean
+```{r task2a}
 
-Нулевая гипотеза: препарат не лучше стандартной терапии
-Альтернативная гипотеза: препарат лучше
+log_model_radius <- glm(diagnosis_numeric ~ radius_mean, 
+                        data = cancer_data_log, 
+                        family = binomial(link = "logit"))
 
-```{r}
+tidy_log_radius <- tidy(log_model_radius, conf.int = TRUE, exponentiate = TRUE)
+glance_log_radius <- glance(log_model_radius)
+
+kable(tidy_log_radius)
+kable(glance_log_radius[, c("null.deviance", "deviance", "AIC", "BIC")])
+
+# График
+p_log_radius <- ggplot(cancer_data_log, aes(x = radius_mean, y = diagnosis_numeric)) +
+  geom_point(aes(color = diagnosis), alpha = 0.3, position = position_jitter(height = 0.03)) + 
+  geom_smooth(method = "glm", method.args = list(family = binomial), color = "blue", se = TRUE) +
+  scale_color_manual(values = c("B" = "forestgreen", "M" = "coral")) +
+  labs(title = "Вероятность злокачественной опухоли от радиуса",
+       x = "Средний радиус",
+       y = "Вероятность",
+       color = "Диагноз") +
+  theme_minimal()
+
+print(p_log_radius)
+```
+Средний радиус опухоли является сильным и статистически значимым (p<0.001) предиктором вероятности злокачественности, причем увеличение радиуса на 1 единицу увеличивает шансы на злокачественность примерно в 2.81 раза. График наглядно демонстрирует, что с ростом радиуса вероятность диагноза "M" (злокачественная) резко возрастает.
+
+### diagnosis_numeric ~ area_mean
+```{r task2b}
+
+log_model_area <- glm(diagnosis_numeric ~ area_mean, 
+                      data = cancer_data_log, 
+                      family = binomial(link = "logit"))
+
+tidy_log_area <- tidy(log_model_area, conf.int = TRUE, exponentiate = TRUE) 
+glance_log_area <- glance(log_model_area)
+
+kable(tidy_log_area)
+kable(glance_log_area[, c("null.deviance", "deviance", "AIC", "BIC")])
+
+# График
+p_log_area <- ggplot(cancer_data_log, aes(x = area_mean, y = diagnosis_numeric)) +
+  geom_point(aes(color = diagnosis), alpha = 0.3, position = position_jitter(height = 0.03)) +
+  geom_smooth(method = "glm", method.args = list(family = binomial), color = "green4", se = TRUE) +
+  scale_color_manual(values = c("B" = "forestgreen", "M" = "coral")) +
+  labs(title = "Вероятность злокачественной опухоли от площади",
+       x = "Средняя площадь",
+       y = "Вероятность",
+       color = "Диагноз") +
+  theme_minimal()
+
+print(p_log_area)
+```
+Средняя площадь опухоли также является сильным и статистически значимым (p<0.001) предиктором злокачественности. Увеличение площади на 1 единицу увеличивает шансы диагноза "M" примерно на 1.2%. Как и в случае с радиусом, график показывает явный рост вероятности злокачественной опухоли с увеличением площади.
+
+### diagnosis_numeric ~ texture_mean
+```{r task2c}
+
+log_model_texture <- glm(diagnosis_numeric ~ texture_mean, 
+                         data = cancer_data_log, 
+                         family = binomial(link = "logit"))
+
+tidy_log_texture <- tidy(log_model_texture, conf.int = TRUE, exponentiate = TRUE) 
+glance_log_texture <- glance(log_model_texture)
+
+kable(tidy_log_texture)
+kable(glance_log_texture[, c("null.deviance", "deviance", "AIC", "BIC")])
+
+# График
+p_log_texture <- ggplot(cancer_data_log, aes(x = texture_mean, y = diagnosis_numeric)) +
+  geom_point(aes(color = diagnosis), alpha = 0.3, position = position_jitter(height = 0.03)) +
+  geom_smooth(method = "glm", method.args = list(family = binomial), color = "red", se = TRUE) +
+  scale_color_manual(values = c("B" = "forestgreen", "M" = "coral")) +
+  labs(title = "Вероятность злокачественной опухоли от текстуры",
+       x = "Средняя текстура",
+       y = "Вероятность",
+       color = "Диагноз") +
+  theme_minimal()
+
+print(p_log_texture)
+```
+Средняя текстура опухоли является статистически значимым (p<0.001) предиктором злокачественности. Увеличение текстуры на 1 единицу повышает шансы на диагноз "M" примерно в 1.27 раза. Хотя график показывает положительную тенденцию, наблюдается большее смешение точек по сравнению с моделями, основанными на радиусе и площади, что указывает на менее четкое разделение классов только по текстуре.
+
+### Множественная логистическая регрессия
+
+```{r task2tot}
+
+log_model_multi <- glm(diagnosis_numeric ~ area_mean + texture_mean, 
+                       data = cancer_data_log, 
+                       family = binomial(link = "logit"))
+
+summary(log_model_multi) 
+tidy_log_multi <- tidy(log_model_multi, conf.int = TRUE, exponentiate = TRUE)
+glance_log_multi <- glance(log_model_multi)
+
+kable(tidy_log_multi)
+kable(glance_log_multi[, c("null.deviance", "deviance", "AIC", "BIC")])
+```
+Я исключил radius_mean из-за сильной корреляции с area_mean. В полученной модели, включающей среднюю площадь и среднюю текстуру, оба предиктора остаются высокозначимыми (p<0.001) для прогнозирования злокачественности. Комбинированная модель  обеспечивает значительно лучшее соответствие данным (AIC=294.96) по сравнению с моделями, использующими только один из этих предикторов, указывая на их независимый вклад в прогноз.
+
+## Задание 3
+Я не стал использовать формулу данную в задании и выбрал формулу Шенфельда, так как она является стандартным методом для расчета необходимого числа событий при планировании исследований, которые будут анализироваться с помощью регрессии Кокса
+```{r task3}
+
+HR <- 2
+d <- 0.8
+p1 <- 0.5
+p2 <- 0.5
 alpha <- 0.05
-cat("Уровень значимости:", alpha, "\n")
+beta <- 0.20
 
-t_test_result <- t.test(x = bp_before, y = bp_after,
-                          paired = TRUE,
-                          alternative = "greater",
-                          conf.level = 1 - alpha)
+# Расчет квантилей
+Z_alpha_2 <- qnorm(1 - alpha / 2)
+Z_beta <- qnorm(1 - beta)
 
-print(t_test_result)
+# Необходимое общее число событий
+E_raw <- (Z_alpha_2 + Z_beta)^2 / (p1 * p2 * (log(HR))^2)
+E <- ceiling(E_raw) 
+
+# Общий размер выборки
+N_raw <- E / d
+N <- ceiling(N_raw) 
+
+# Размер выборки по группам
+n1 <- ceiling(N * p1) 
+n2 <- N - n1
+N_final <- n1 + n2 
+
+# Вывод результатов
+cat("Расчет размера выборки по Шенфельду\n")
+cat(paste("Требуемое общее число событий:", E, "\n"))
+cat(paste("Общий размер выборки:", N_final, "\n"))
+cat(paste("Требуемый размер для группы 1:", n1, "\n"))
+cat(paste("Требуемый размер для группы 2:", n2, "\n"))
 ```
-Сравниваются два средних значения количественной переменной (давление до и после) сделаных на одних и тех же пациентах, т.е. данные являются зависимыми => наиболее подходящим тестом является парный t-тест
-На основании полученных данных мы можем сказать, что существуют статистически значимые доказательства в пользу альтернативной гипотезы => наблюдаемое снижение артериального давления не случайно => новый препарат в среднем снижает систолическое артериальное давление.
-
+Для обнаружения отношения рисков HR=2 с мощностью 80% при уровне значимости 5% (двусторонний тест), при условии, что 80% пациентов столкнутся с событием, необходимо включить 42 и 41 (или 42 если принципиально равенство групп) пациента в группу, что составляет общую выборку в 83 (84) пациента
